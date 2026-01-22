@@ -187,8 +187,11 @@ func (r *FileTokenRepository) readTokenFile(path string) (*Token, error) {
 		return nil, nil
 	}
 
-	// 检查 auth_method
+	// 检查 auth_method（支持 camelCase/snake_case）
 	authMethod, _ := metadata["auth_method"].(string)
+	if authMethod == "" {
+		authMethod, _ = metadata["authMethod"].(string)
+	}
 	if authMethod != "idc" && authMethod != "builder-id" {
 		return nil, nil // 只处理 IDC 和 Builder ID token
 	}
@@ -198,23 +201,32 @@ func (r *FileTokenRepository) readTokenFile(path string) (*Token, error) {
 		AuthMethod: authMethod,
 	}
 
-	// 解析各字段
+	// 解析各字段（支持 camelCase 和 snake_case 两种格式）
 	if v, ok := metadata["access_token"].(string); ok {
 		token.AccessToken = v
 	}
 	if v, ok := metadata["refresh_token"].(string); ok {
 		token.RefreshToken = v
 	}
-	if v, ok := metadata["client_id"].(string); ok {
+	// 支持 clientId (camelCase) 和 client_id (snake_case)
+	if v, ok := metadata["clientId"].(string); ok {
+		token.ClientID = v
+	} else if v, ok := metadata["client_id"].(string); ok {
 		token.ClientID = v
 	}
-	if v, ok := metadata["client_secret"].(string); ok {
+	// 支持 clientSecret (camelCase) 和 client_secret (snake_case)
+	if v, ok := metadata["clientSecret"].(string); ok {
+		token.ClientSecret = v
+	} else if v, ok := metadata["client_secret"].(string); ok {
 		token.ClientSecret = v
 	}
 	if v, ok := metadata["region"].(string); ok {
 		token.Region = v
 	}
-	if v, ok := metadata["start_url"].(string); ok {
+	// 支持 startURL (camelCase) 和 start_url (snake_case)
+	if v, ok := metadata["startURL"].(string); ok {
+		token.StartURL = v
+	} else if v, ok := metadata["start_url"].(string); ok {
 		token.StartURL = v
 	}
 	if v, ok := metadata["provider"].(string); ok {
