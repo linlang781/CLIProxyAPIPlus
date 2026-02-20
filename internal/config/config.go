@@ -97,6 +97,10 @@ type Config struct {
 	// ClaudeKey defines a list of Claude API key configurations as specified in the YAML configuration file.
 	ClaudeKey []ClaudeKey `yaml:"claude-api-key" json:"claude-api-key"`
 
+	// ClaudeHeaderDefaults configures default header values for Claude API requests.
+	// These are used as fallbacks when the client does not send its own headers.
+	ClaudeHeaderDefaults ClaudeHeaderDefaults `yaml:"claude-header-defaults" json:"claude-header-defaults"`
+
 	// OpenAICompatibility defines OpenAI API compatibility configurations for external providers.
 	OpenAICompatibility []OpenAICompatibility `yaml:"openai-compatibility" json:"openai-compatibility"`
 
@@ -128,6 +132,15 @@ type Config struct {
 	IncognitoBrowser bool `yaml:"incognito-browser" json:"incognito-browser"`
 
 	legacyMigrationPending bool `yaml:"-" json:"-"`
+}
+
+// ClaudeHeaderDefaults configures default header values injected into Claude API requests
+// when the client does not send them. Update these when Claude Code releases a new version.
+type ClaudeHeaderDefaults struct {
+	UserAgent      string `yaml:"user-agent" json:"user-agent"`
+	PackageVersion string `yaml:"package-version" json:"package-version"`
+	RuntimeVersion string `yaml:"runtime-version" json:"runtime-version"`
+	Timeout        string `yaml:"timeout" json:"timeout"`
 }
 
 // TLSConfig holds HTTPS server settings.
@@ -367,6 +380,9 @@ type CodexKey struct {
 	// BaseURL is the base URL for the Codex API endpoint.
 	// If empty, the default Codex API URL will be used.
 	BaseURL string `yaml:"base-url" json:"base-url"`
+
+	// Websockets enables the Responses API websocket transport for this credential.
+	Websockets bool `yaml:"websockets,omitempty" json:"websockets,omitempty"`
 
 	// ProxyURL overrides the global proxy setting for this API key if provided.
 	ProxyURL string `yaml:"proxy-url" json:"proxy-url"`
@@ -736,14 +752,44 @@ func payloadRawString(value any) ([]byte, bool) {
 // SanitizeOAuthModelAlias normalizes and deduplicates global OAuth model name aliases.
 // It trims whitespace, normalizes channel keys to lower-case, drops empty entries,
 // allows multiple aliases per upstream name, and ensures aliases are unique within each channel.
+// It also injects default aliases for channels that have built-in defaults (e.g., kiro)
+// when no user-configured aliases exist for those channels.
 func (cfg *Config) SanitizeOAuthModelAlias() {
-	if cfg == nil || len(cfg.OAuthModelAlias) == 0 {
+	if cfg == nil {
+		return
+	}
+
+	// Inject default Kiro aliases if no user-configured kiro aliases exist
+	if cfg.OAuthModelAlias == nil {
+		cfg.OAuthModelAlias = make(map[string][]OAuthModelAlias)
+	}
+	if _, hasKiro := cfg.OAuthModelAlias["kiro"]; !hasKiro {
+		// Check case-insensitive too
+		found := false
+		for k := range cfg.OAuthModelAlias {
+			if strings.EqualFold(strings.TrimSpace(k), "kiro") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			cfg.OAuthModelAlias["kiro"] = defaultKiroAliases()
+		}
+	}
+
+	if len(cfg.OAuthModelAlias) == 0 {
 		return
 	}
 	out := make(map[string][]OAuthModelAlias, len(cfg.OAuthModelAlias))
 	for rawChannel, aliases := range cfg.OAuthModelAlias {
 		channel := strings.ToLower(strings.TrimSpace(rawChannel))
-		if channel == "" || len(aliases) == 0 {
+		if channel == "" {
+			continue
+		}
+		// Preserve channels that were explicitly set to empty/nil – they act
+		// as "disabled" markers so default injection won't re-add them (#222).
+		if len(aliases) == 0 {
+			out[channel] = nil
 			continue
 		}
 		seenAlias := make(map[string]struct{}, len(aliases))
